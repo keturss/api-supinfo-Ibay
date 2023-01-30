@@ -1,85 +1,72 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using System.Security.Claims;
+using apiSupinfo.Models.Service.Interface;
+using AutoMapper;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ProjetWebAPI.DAL;
 using ProjetWebAPI.Models.DTO;
 
 namespace apiSupinfo.Controllers;
 
-[Route("api/[controller]")]
+[Route("[controller]/[action]")]
 [ApiController]
 public class CartController : ControllerBase
 {
-    private readonly DbFactoryContext _context;
 
-    public CartController(DbFactoryContext context)
+    private readonly IConfiguration _config;
+    private readonly ICartService _cartService;
+    private readonly IMapper _mapper;
+        
+        
+    public CartController(IConfiguration config,ICartService service , IMapper mapper)
     {
-        _context = context;
+        _config = config;
+        _cartService = service;
+        _mapper = mapper;
+    }
+
+    
+    [HttpGet]
+    [AllowAnonymous]
+    public ActionResult<List<Product>> GetProducts()
+    {
+        var listOfU = _cartService.getCart(new User());
+        if (listOfU == null)
+            return NotFound(); 
+        return Ok(listOfU);
     }
     
-
-    // GET: api/Carts/5
-    [HttpGet("{id}")]
-    public async Task<ActionResult<Cart>> GetCart(int id)
-    {
-        var cart = await _context.Carts
-            .Include(c => c.Items)
-            .ThenInclude(cp => cp.Product)
-            .FirstOrDefaultAsync(c => c.Id == id);
-
-        return cart == null ? NotFound() : cart;
-    }
-
-    // PUT: api/Carts/5
-    [HttpPut("{id}")]
-    public async Task<IActionResult> PutCart(int id, Cart cart)
-    {
-        if (id != cart.Id)
-        {
-            return BadRequest();
-        }
-
-        _context.Entry(cart).State = EntityState.Modified;
-
-        try
-        {
-            await _context.SaveChangesAsync();
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            if (!CartExists(id)) return NotFound(); 
-        }
-
-        return NoContent();
-    }
-
-    // POST: api/Carts
+    
     [HttpPost]
-    public async Task<ActionResult<Cart>> PostCart(Cart cart)
+    [Authorize]
+    public ActionResult<Product> AddProduct(int id)
     {
-        _context.Carts.Add(cart);
-        await _context.SaveChangesAsync();
-
-        return CreatedAtAction("GetCart", new {id = cart.Id}, cart);
+        User currentUser = GetCurrentUser();
+        var productTemp = _cartService.addProduct(id,currentUser);
+        return Ok(productTemp);
     }
-
-    // DELETE: api/Carts/5
+    
+    
     [HttpDelete("{id}")]
-    public async Task<ActionResult<Cart>> DeleteCart(int id)
+    [Authorize]
+    public ActionResult<Product> DeleteProduct(int id)
     {
-        var cart = await _context.Carts.FindAsync(id);
-        if (cart == null)
-        {
-            return NotFound();
-        }
-
-        _context.Carts.Remove(cart);
-        await _context.SaveChangesAsync();
-
-        return cart;
+        User currentUser = GetCurrentUser();
+        var product = _cartService.removeProduct(id, currentUser);
+        return Ok(product);
     }
-
-    private bool CartExists(int id)
+    
+    private User GetCurrentUser()
     {
-        return _context.Carts.Any(e => e.Id == id);
+        if (HttpContext.User.Identity is not ClaimsIdentity identity) return null;
+            
+        var userClaims = identity.Claims;
+        return new User
+        {
+            Id = Int16.Parse(userClaims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value),
+            Username = userClaims.FirstOrDefault(x => x.Type == ClaimTypes.Name)?.Value,
+            Role = userClaims.FirstOrDefault(x => x.Type == ClaimTypes.Role)?.Value
+        };
     }
 }

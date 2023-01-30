@@ -1,121 +1,139 @@
 ﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using apiSupinfo.Models.Service.Interface;
+using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using ProjetWebAPI.DAL;
+using ProjetWebAPI.Models.DTO;
 using ProjetWebAPI.Models.Inputs;
 
 namespace DualAuthCore.Controllers
 {
-    [Authorize]
+    
     [Route("[controller]/[action]")]
     public class AccountController : Controller
     {
         private readonly IConfiguration _config;
-        private readonly UserManager<IdentityUser> _userManager;
-        private readonly SignInManager<IdentityUser> _signInManager;
-
-        public AccountController(IConfiguration config, UserManager<IdentityUser> userManager,
-            SignInManager<IdentityUser> signInManager)
+        private readonly IUserService _userService;
+        private readonly IMapper _mapper;
+        
+        
+        public AccountController(IConfiguration config,IUserService service , IMapper mapper)
         {
             _config = config;
-            _userManager = userManager;
-            _signInManager = signInManager;
+            _userService = service;
+            _mapper = mapper;
         }
-
+        
         [HttpGet]
-        public async Task<IActionResult> GetUser()
+        [Authorize]
+        public ActionResult<List<User>> GetAllUsers()
         {
-            var user = await _userManager.GetUserAsync(User);
+            var listOfU =  _userService.GetUsersList();
+            var userViewM = _mapper.Map<List<User>>(listOfU);
+            if (listOfU == null)
+                return NotFound(); 
+            return Ok(userViewM);
+        }
+
+        [HttpGet("{id}")]
+        public ActionResult<User> GetUser(int id)
+        {
+            var user = _userService.GetUserById(id);
+            var userViewM = _mapper.Map<User>(user);
             if (user == null)
-            {
                 return NotFound();
-            }
-
-            return Ok(user);
+            return Ok(userViewM);
         }
         
-        [AllowAnonymous]
-        [HttpPost("login")]
-        public async Task<IActionResult> Login([FromBody] UserLoginInput model)
-        {
-            var result = await _signInManager.PasswordSignInAsync(model.Username, model.Password, false, false);
-
-            if (!result.Succeeded) return Unauthorized();
-            
-            var appUser = _userManager.Users.SingleOrDefault(r => r.UserName == model.Username);
-            return Ok(new
-            {
-                token = GenerateJWT(appUser)
-            });
-
-        }
-
-        [AllowAnonymous]
-        [HttpPost("register")]
-        public async Task<IActionResult> Register([FromBody] UserRegisterInput model)
-        {
-            var user = new IdentityUser
-            {
-                UserName = model.Username
-            };
-            var result = await _userManager.CreateAsync(user, model.Password);
-
-            if (!result.Succeeded) return BadRequest(result.Errors);
-            
-            await _signInManager.SignInAsync(user, false);
-            
-            return Ok(new
-            {
-                token = GenerateJWT(user)
-            });
-
-        }
-        
+        //Update user
         [HttpPut]
-        public async Task<IActionResult> UpdateUser([FromBody] UserUpdateInput model)
+        [Authorize]
+        public ActionResult<User> SaveUser([FromForm] UserUpdateInput input)
         {
-            var user = await _userManager.GetUserAsync(User);
-            if (user == null)
-            {
-                return NotFound();
-            }
+            var userLogin = _mapper.Map<User>(input);
+            var user = _userService.Authenticate(userLogin);
+            var currentUser = GetCurrentUser();
+            if (currentUser.Id != user.Id) return BadRequest(user.Id);
+            var model=_userService.SaveUser(user);
+            var userViewM = _mapper.Map<User>(model);
+            return Ok(userViewM);
+        }
+        
 
-            user.Email = model.Email;
-            user.UserName = model.Email;
+        [HttpPost]
+        [AllowAnonymous]
+        public ActionResult<User> CreateUser([FromForm] UserCreateInput input)
+        {
+            var user = _mapper.Map<User>(input);
+            var model = _userService.CreateUser(user);
+            return Ok(model);
+        }
+        
+        
+        [HttpDelete]
+        [Authorize]
+        public ActionResult<User> DeleteUser(int id)
+        {
+            var currentUser = GetCurrentUser();
+            if (currentUser.Id != id) return BadRequest("Not same user");
+            var model = _userService.DeleteUser(id);
+            return Ok(model);
+        }
+        
+        [AllowAnonymous]
+        [HttpPost]
+        public ActionResult<string> Login([FromForm] UserLoginInput input)
+        {
+            var userLogin = _mapper.Map<User>(input);
+            var user = _userService.Authenticate(userLogin);
+            if (user == null) return NotFound("user not found");
+            
+            var token = GenerateToken(user);
+            return Ok(token);
 
-            var result = await _userManager.UpdateAsync(user);
-            if (!result.Succeeded)
-            {
-                return BadRequest(new { message = "Failed to update user" });
-            }
-
-            return Ok();
         }
 
 
-        private string GenerateJWT(IdentityUser user)
+
+        // To generate token
+        private string GenerateToken(User user)
         {
+            var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
+            var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
             var claims = new[]
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.UserName),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(ClaimTypes.NameIdentifier,user.Id.ToString()),
+                new Claim(ClaimTypes.Name,user.Username),
+                new Claim(ClaimTypes.Role,user.Role)
             };
-
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var token = new JwtSecurityToken(
-                _config["Jwt:Issuer"],
-                _config["Jwt:Issuer"],
+            var token = new JwtSecurityToken(_config["Jwt:Issuer"],
+                _config["Jwt:Audience"],
                 claims,
-                expires: DateTime.Now.AddMinutes(30),
-                signingCredentials: creds
-            );
+                expires: DateTime.Now.AddMinutes(60*24*7),
+                signingCredentials: credentials);
 
             return new JwtSecurityTokenHandler().WriteToken(token);
         }
+        
+        private  User GetCurrentUser()
+        {
+            if (HttpContext.User.Identity is not ClaimsIdentity identity) return null;
+            
+            var userClaims = identity.Claims;
+            return new User
+            {
+                Id = Int16.Parse(userClaims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value),
+                Username = userClaims.FirstOrDefault(x => x.Type == ClaimTypes.Name)?.Value,
+                Role = userClaims.FirstOrDefault(x => x.Type == ClaimTypes.Role)?.Value
+            };
+        }
     }
+    
+   
 }

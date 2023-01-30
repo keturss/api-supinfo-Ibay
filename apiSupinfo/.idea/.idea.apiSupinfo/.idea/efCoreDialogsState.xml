@@ -5,7 +5,10 @@
       <map>
         <entry key="Common:883c63d4-c12d-47f9-8385-a7a07e7f0f7f:dbContext" value="ProjetWebAPI.DAL.DbFactoryContext" />
         <entry key="Common:buildConfiguration" value="Debug" />
-        <entry key="Common:noBuild" value="false" />
+        <entry key="Common:idempotent" value="false" />
+        <entry key="Common:noBuild" value="true" />
+        <entry key="Common:noTransactions" value="false" />
+        <entry key="Common:outputFilePath" value="script.sql" />
         <entry key="Common:outputFolder" value="Migrations" />
         <entry key="Common:useDefaultConnection" value="true" />
       </map>

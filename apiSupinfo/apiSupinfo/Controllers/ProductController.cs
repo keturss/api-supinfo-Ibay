@@ -1,4 +1,7 @@
-﻿using apiSupinfo.Models.Inputs.Product;
+﻿using System.Security.Claims;
+using apiSupinfo.Models.Inputs.Product;
+using apiSupinfo.Models.Service.Interface;
+using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
@@ -8,95 +11,99 @@ using ProjetWebAPI.Models.DTO;
 
 namespace apiSupinfo.Controllers;
 
-[Route("api/[controller]")]
+[Route("[controller]/[action]")]
 [ApiController]
 public class ProductController : ControllerBase
 {
-    private readonly DbFactoryContext _context;
-
-    public ProductController(DbFactoryContext context)
+    private readonly IConfiguration _config;
+    private readonly IProductService _productService;
+    private readonly IMapper _mapper;
+        
+        
+    public ProductController(IConfiguration config,IProductService service , IMapper mapper)
     {
-        _context = context;
+        _config = config;
+        _productService = service;
+        _mapper = mapper;
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<Product>>> GetProducts()
+    [AllowAnonymous]
+    public ActionResult<Product> GetProducts()
     {
-        return await _context.Products.ToListAsync();
+        var listOfU =  _productService.GetProductsList();
+        var productViewM = _mapper.Map<List<Product>>(listOfU);
+        if (listOfU == null)
+            return NotFound(); 
+        return Ok(productViewM);
     }
 
-    // GET: api/Products/5
+
     [HttpGet("{id}")]
-    public async Task<ActionResult<Product>> GetProduct(int id)
+    [AllowAnonymous]
+    public ActionResult<Product> GetProduct(int id)
     {
-        var product = await _context.Products.FindAsync(id);
-
+        var product = _productService.GetProductById(id);
+        var productViewM = _mapper.Map<Product>(product);
         if (product == null)
-        {
             return NotFound();
-        }
-
-        return product;
+        return Ok(productViewM);
     }
 
-    // PUT: api/Products/5
+
     [HttpPut("{id}")]
-    public async Task<IActionResult> PutProduct(int id, Product product)
+    [Authorize(Roles = "Seller, Admin")]
+    public ActionResult<Product> UpdateProduct(int id,[FromForm] ProductUpdateInput input)
     {
+        var product = _mapper.Map<Product>(input);
+        
         if (id != product.Id)
         {
             return BadRequest();
         }
+        
+        var currentUser = GetCurrentUser();
 
-        _context.Entry(product).State = EntityState.Modified;
+        var productTemp = _productService.UpdateProduct(product, currentUser.Id);
 
-        try
-        {
-            await _context.SaveChangesAsync();
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            if (!ProductExists(id))
-            {
-                return NotFound();
-            }
-            else
-            {
-                throw;
-            }
-        }
-
-        return NoContent();
+        return Ok(productTemp);
     }
 
-    // POST: api/Products
+    
     [HttpPost]
-    public async Task<ActionResult<Product>> PostProduct(Product product)
+    [Authorize(Roles = "Seller, Admin")]
+    public ActionResult<Product> CreateProduct([FromForm] ProductCreateInput input)
     {
-        _context.Products.Add(product);
-        await _context.SaveChangesAsync();
-
-        return CreatedAtAction("GetProduct", new {id = product.Id}, product);
+        var product = _mapper.Map<Product>(input);
+        
+        var currentUser = GetCurrentUser();
+        product.SellerId = currentUser.Id;
+        
+        var productTemp = _productService.CreateProduct(product); //TODO if exist
+        return Ok(productTemp);
     }
 
-    // DELETE: api/Products/5
+
     [HttpDelete("{id}")]
-    public async Task<ActionResult<Product>> DeleteProduct(int id)
+    [Authorize(Roles = "Seller, Admin")]
+    public ActionResult<Product> DeleteProduct(int id)
     {
-        var product = await _context.Products.FindAsync(id);
-        if (product == null)
+        var currentUser = GetCurrentUser();
+        var product = _productService.DeleteProduct(id, currentUser.Id);
+        return Ok(product);
+    }
+
+    private User GetCurrentUser()
+    {
+        if (HttpContext.User.Identity is not ClaimsIdentity identity) return null;
+            
+        var userClaims = identity.Claims;
+        return new User
         {
-            return NotFound();
-        }
-
-        _context.Products.Remove(product);
-        await _context.SaveChangesAsync();
-
-        return product;
+            Id = Int16.Parse(userClaims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value),
+            Username = userClaims.FirstOrDefault(x => x.Type == ClaimTypes.Name)?.Value,
+            Role = userClaims.FirstOrDefault(x => x.Type == ClaimTypes.Role)?.Value
+        };
     }
-
-    private bool ProductExists(int id)
-    {
-        return _context.Products.Any(e => e.Id == id);
-    }
+    
 }
