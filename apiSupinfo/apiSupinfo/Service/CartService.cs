@@ -1,5 +1,7 @@
 using System.Runtime.Intrinsics.X86;
+using apiSupinfo.Models.Inputs.Product;
 using apiSupinfo.Models.Service.Interface;
+using AutoMapper;
 using Microsoft.EntityFrameworkCore;
 using ProjetWebAPI.DAL;
 using ProjetWebAPI.Models.DTO;
@@ -9,34 +11,65 @@ namespace apiSupinfo.Models.Service;
 public class CartService : ICartService
 {
     private DbFactoryContext _context;
+    
+    private readonly IMapper _mapper;
 
-    public CartService(DbFactoryContext context)
+    public CartService(DbFactoryContext context,IMapper mapper)
     {
         _context = context;
+        
+        _mapper = mapper;
     }
 
-    public Cart? addProduct(int id, User user)
+    public Cart addProduct(CartCreateInput input)
     {
-        var item = _context.Carts.FromSql($"INSERT INTO Carts Values '{user.Id}','{id}';").ToList();
-        return item != null ? (Cart)item[0] : null;
+        var cart = _mapper.Map<Cart>(input);
+        _context.Add<Cart>(cart);
+
+        _context.SaveChanges();
+        return cart;
     }
     
 
     public Cart removeProduct(int id, User currentUser)
     {
-        var item = _context.Carts.FromSql($"Delete From Carts Where ProductId = {id} AND Id = {currentUser.Id};").ToList();
-        return item != null ? (Cart)item[0] : null;
+
+        var cart=GetCartById(id);
+
+        if (currentUser.Id != cart.UserId) return cart; 
+        if (cart == null) return cart;//TODO error message
+            
+        _context.Remove<Cart>(cart);
+        _context.SaveChanges();
+            
+        return cart;
     }
 
-    private Cart GetCartById(int id, User currentUser)
+    private Cart GetCartById(int id)
     {
-        var item = _context.Carts.FromSql($"SELECT * From Carts Where ProductId = {id} AND Id = {currentUser.Id};").ToList();
-        return item != null ? (Cart)item[0] : null;
+        Cart product;
+        try
+        {
+            product = _context.Find<Cart>(id);
+        }
+        catch (Exception)
+        {
+            throw;
+        }
+        return product;
     }
     
     public List<Cart> getCart(User currentUser)
     {
-        var cart = _context.Carts.FromSql($"SELECT * From Carts Where UserId = {currentUser.Id};").ToList();
-        return cart;
+        List<Cart> CartList;
+        try
+        {
+            CartList = _context.Set<Cart>().ToList();
+        }
+        catch (Exception)
+        {
+            throw;
+        }
+        return CartList;
     }
 }

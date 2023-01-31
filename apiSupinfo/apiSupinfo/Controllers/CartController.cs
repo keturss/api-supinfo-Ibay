@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using apiSupinfo.Models.Inputs.Product;
 using apiSupinfo.Models.Service.Interface;
 using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
@@ -29,7 +30,7 @@ public class CartController : ControllerBase
     
     [HttpGet]
     [AllowAnonymous]
-    public ActionResult<List<Product>> GetProducts()
+    public ActionResult<List<Cart>> GetProducts()
     {
         var listOfU = _cartService.getCart(new User());
         if (listOfU == null)
@@ -38,19 +39,24 @@ public class CartController : ControllerBase
     }
     
     
-    [HttpPost]
+    [HttpPost("{id}")]
     [Authorize]
-    public ActionResult<Product> AddProduct(int id)
+    public ActionResult<Cart> AddProduct(int id)
     {
         User currentUser = GetCurrentUser();
-        var productTemp = _cartService.addProduct(id,currentUser);
-        return Ok(productTemp);
+        CartCreateInput cart = new CartCreateInput
+        {
+            UserId = currentUser.Id,
+            ProductId = id
+        };
+        var cartReceive = _cartService.addProduct(cart);
+        return Ok(cartReceive);
     }
     
     
     [HttpDelete("{id}")]
     [Authorize]
-    public ActionResult<Product> DeleteProduct(int id)
+    public ActionResult<Cart> DeleteProduct(int id)
     {
         User currentUser = GetCurrentUser();
         var product = _cartService.removeProduct(id, currentUser);
